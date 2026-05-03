@@ -1133,6 +1133,19 @@ def resolve_runtime_provider(
             "requested_provider": requested_provider,
         }
 
+    if provider == "claude-code-cli":
+        # Claude Code CLI subprocess — Anthropic Max subscription.
+        # No HTTP endpoint; run_agent.py routes via claude_code_cli api_mode.
+        # No API key needed — OAuth token lives in ~/.claude/auth.json.
+        return {
+            "provider": "claude-code-cli",
+            "api_mode": "claude_code_cli",
+            "base_url": "",
+            "api_key": "",
+            "source": "claude-code-cli",
+            "requested_provider": requested_provider,
+        }
+
     # Anthropic (native Messages API)
     if provider == "anthropic":
         # Allow base URL override from config.yaml model.base_url, but only

@@ -197,6 +197,12 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         inference_base_url=DEFAULT_COPILOT_ACP_BASE_URL,
         base_url_env_var="COPILOT_ACP_BASE_URL",
     ),
+    "claude-code-cli": ProviderConfig(
+        id="claude-code-cli",
+        name="Claude Code CLI (Max subscription)",
+        auth_type="external_process",
+        inference_base_url="",  # No HTTP endpoint — subprocess only
+    ),
     "gemini": ProviderConfig(
         id="gemini",
         name="Google AI Studio",
@@ -3488,6 +3494,21 @@ def get_auth_status(provider_id: Optional[str] = None) -> Dict[str, Any]:
         return get_gemini_oauth_auth_status()
     if target == "copilot-acp":
         return get_external_process_provider_status(target)
+    if target == "claude-code-cli":
+        # Claude Code CLI subprocess — check if binary exists
+        claude_bin = (
+            os.getenv("HERMES_CLAUDE_CODE_COMMAND", "").strip()
+            or shutil.which("claude")
+            or "/root/.hermes/node/bin/claude"
+        )
+        resolved = shutil.which(claude_bin) or (claude_bin if os.path.isfile(claude_bin) else None)
+        return {
+            "configured": bool(resolved),
+            "logged_in": bool(resolved),
+            "provider": target,
+            "name": "Claude Code CLI (Max subscription)",
+            "command": resolved or claude_bin,
+        }
     # API-key providers
     pconfig = PROVIDER_REGISTRY.get(target)
     if pconfig and pconfig.auth_type == "api_key":
@@ -3557,6 +3578,31 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
             code="invalid_provider",
         )
 
+    # claude-code-cli uses the Claude Code CLI binary directly (subprocess, not ACP).
+    # OAuth stays in ~/.claude/auth.json — we never extract it.
+    if provider_id == "claude-code-cli":
+        claude_bin = (
+            os.getenv("HERMES_CLAUDE_CODE_COMMAND", "").strip()
+            or shutil.which("claude")
+            or "/root/.hermes/node/bin/claude"
+        )
+        resolved = shutil.which(claude_bin) or (claude_bin if os.path.isfile(claude_bin) else None)
+        if not resolved:
+            raise AuthError(
+                f"Could not find claude binary at '{claude_bin}'. "
+                "Install Claude Code CLI: npm install -g @anthropic-ai/claude-code",
+                provider=provider_id,
+                code="missing_claude_cli",
+            )
+        return {
+            "provider": provider_id,
+            "api_key": "***",
+            "base_url": "",
+            "command": resolved,
+            "args": ["--print", "--output-format", "json"],
+            "source": "claude-code-cli",
+        }
+
     base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
     if not base_url:
         base_url = pconfig.inference_base_url
@@ -3579,7 +3625,7 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
 
     return {
         "provider": provider_id,
-        "api_key": "copilot-acp",
+        "api_key": "***",
         "base_url": base_url.rstrip("/"),
         "command": resolved_command or command,
         "args": args,
