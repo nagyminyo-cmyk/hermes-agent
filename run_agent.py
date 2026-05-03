@@ -1070,6 +1070,11 @@ class AIAgent:
             # AWS Bedrock — auto-detect from provider name or base URL
             # (bedrock-runtime.<region>.amazonaws.com).
             self.api_mode = "bedrock_converse"
+        elif self.provider == "claude-code-cli":
+            # Claude Code CLI subprocess (Anthropic Max subscription).
+            # Shells out to `claude --print` with automatic Qwen fallback.
+            # OAuth token stays in ~/.claude/auth.json — never extracted.
+            self.api_mode = "claude_code_cli"
         else:
             self.api_mode = "chat_completions"
 
@@ -6381,11 +6386,31 @@ class AIAgent:
                         raise
                     result["response"] = normalize_converse_response(raw_response)
                 else:
-                    request_client_holder["client"] = self._create_request_openai_client(
-                        reason="chat_completion_request",
-                        api_kwargs=api_kwargs,
-                    )
-                    result["response"] = request_client_holder["client"].chat.completions.create(**api_kwargs)
+                    # Claude Code CLI subprocess — Anthropic Max subscription
+                    # (ToS exempt lane: official CLI subprocess, Feb 19 2026).
+                    # Falls back to Qwen DashScope on any error.
+                    if self.api_mode == "claude_code_cli":
+                        from agent.claude_code_bridge import call_boss_llm
+
+                        system_content = ""
+                        user_content = ""
+                        for msg in api_kwargs.get("messages", []):
+                            role = msg.get("role", "")
+                            content = msg.get("content", "")
+                            if role == "system":
+                                system_content = content
+                            elif role == "user":
+                                user_content = content
+                        result["response"] = call_boss_llm(
+                            system=system_content,
+                            user=user_content,
+                        )
+                    else:
+                        request_client_holder["client"] = self._create_request_openai_client(
+                            reason="chat_completion_request",
+                            api_kwargs=api_kwargs,
+                        )
+                        result["response"] = request_client_holder["client"].chat.completions.create(**api_kwargs)
             except Exception as e:
                 result["error"] = e
             finally:
